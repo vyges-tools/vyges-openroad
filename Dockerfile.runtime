@@ -1,0 +1,22 @@
+# Slim runtime image: the SAME relocatable bundle built by scripts/build-bundle.sh,
+# on a clean ubuntu:24.04 with NO build tooling. Binary-first — the container
+# just wraps the byte-identical bundle that also ships as the tarball.
+#
+# Build context = the directory holding the bundle (e.g. ./dist).
+#   docker build -f Dockerfile.runtime --build-arg BUNDLE_DIR=<bundle-basename> \
+#     -t ghcr.io/vyges-tools/vyges-openroad:sha-<short> ./dist
+FROM ubuntu:24.04
+
+# The bundle directory name inside the build context, e.g.
+# vyges-openroad-2026.07.0-gb5624809f290
+ARG BUNDLE_DIR
+
+COPY ${BUNDLE_DIR} /opt/vyges-openroad
+ENV PATH=/opt/vyges-openroad/bin:$PATH
+
+# Fail the build if the wrapped binary does not run on the clean base.
+RUN openroad -version
+
+LABEL org.opencontainers.image.title="vyges-openroad" \
+      org.opencontainers.image.source="https://github.com/vyges-tools/vyges-openroad" \
+      org.opencontainers.image.description="Mainline OpenROAD, pinned + reproducibly built by Vyges."

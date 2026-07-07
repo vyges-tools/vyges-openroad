@@ -1,0 +1,80 @@
+name: nightly
+
+# Track OpenROAD master: build the day's latest commit, publish :sha-<short> +
+# move :master-latest, append to index.json. Unpinned/testing channel — pinned
+# releases come from release.yml. No GH Release (image + index only).
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/vyges-openroad
+  DEPS_IMAGE: ghcr.io/${{ github.repository_owner }}/vyges-openroad-deps
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve master HEAD
+        id: head
+        run: |
+          COMMIT=$(git ls-remote https://github.com/The-OpenROAD-Project/OpenROAD.git HEAD | awk '{print $1}')
+          SHORT=$(echo "$COMMIT" | cut -c1-12)
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "short=$SHORT" >> "$GITHUB_OUTPUT"
+          if [ -f index.json ] && jq -e --arg s "$SHORT" '.builds[]?|select(.short==$s)' index.json >/dev/null; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if already built
+        if: steps.head.outputs.already == 'true'
+        run: echo "master HEAD ${{ steps.head.outputs.short }} already built — nothing to do"
+
+      - uses: docker/login-action@v3
+        if: steps.head.outputs.already == 'false'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ensure deps base
+        if: steps.head.outputs.already == 'false'
+        run: docker pull "$DEPS_IMAGE:latest" || { echo "deps base missing — run the deps-base workflow"; exit 1; }
+
+      - name: Build bundle + wrap + publish
+        if: steps.head.outputs.already == 'false'
+        env:
+          VERSION: nightly-${{ steps.head.outputs.short }}
+          SHORT: ${{ steps.head.outputs.short }}
+        run: |
+          mkdir -p dist
+          docker run --rm \
+            -e OR_COMMIT="${{ steps.head.outputs.commit }}" -e VERSION="$VERSION" -e OUT_DIR=/out \
+            -v "$PWD/dist:/out" -v "$PWD/scripts:/scripts:ro" \
+            "$DEPS_IMAGE:latest" bash /scripts/build-bundle.sh
+          bash scripts/smoke.sh "dist/vyges-openroad-$VERSION-g$SHORT"
+          bash scripts/wrap-container.sh
+          bash scripts/smoke.sh "$IMAGE:sha-$SHORT"
+          docker tag "$IMAGE:sha-$SHORT" "$IMAGE:master-latest"
+          docker push "$IMAGE:sha-$SHORT"
+          docker push "$IMAGE:master-latest"
+          echo "digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:sha-$SHORT" | cut -d@ -f2)" >> "$GITHUB_ENV"
+
+      - name: Append to index.json
+        if: steps.head.outputs.already == 'false'
+        run: |
+          bash scripts/update-index.sh \
+            "${{ steps.head.outputs.commit }}" "${{ steps.head.outputs.short }}" \
+            "nightly-${{ steps.head.outputs.short }}" "${{ env.digest }}" "" nightly
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.json && git commit -m "index: nightly ${{ steps.head.outputs.short }}" && git push

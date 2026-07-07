@@ -1,0 +1,94 @@
+name: release
+
+# Pinned release: build the binary bundle from upstream.yaml's `commit` on the
+# cached deps base, wrap the SAME bundle into the slim runtime image, smoke both,
+# publish the tarball (GH Release) + image (ghcr), and append to index.json.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version YYYY.MM.N (e.g. 2026.07.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # push image tags + create GH Release + commit index.json
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/vyges-openroad
+  DEPS_IMAGE: ghcr.io/${{ github.repository_owner }}/vyges-openroad-deps
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve pin
+        id: pin
+        run: |
+          COMMIT=$(grep -E '^\s*commit:' upstream.yaml | awk '{print $2}')
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "short=$(echo "$COMMIT" | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ensure deps base
+        run: docker pull "$DEPS_IMAGE:latest" || { echo "deps base missing — run the deps-base workflow first"; exit 1; }
+
+      - name: Build binary bundle + tarball (binary-first)
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p dist
+          docker run --rm \
+            -e OR_COMMIT="${{ steps.pin.outputs.commit }}" -e VERSION="$VERSION" -e OUT_DIR=/out \
+            -v "$PWD/dist:/out" -v "$PWD/scripts:/scripts:ro" \
+            "$DEPS_IMAGE:latest" bash /scripts/build-bundle.sh
+
+      - name: Smoke the tarball bundle
+        run: bash scripts/smoke.sh "dist/vyges-openroad-${{ inputs.version }}-g${{ steps.pin.outputs.short }}"
+
+      - name: Wrap bundle into the slim runtime image
+        env:
+          VERSION: ${{ inputs.version }}
+          SHORT: ${{ steps.pin.outputs.short }}
+        run: bash scripts/wrap-container.sh
+
+      - name: Smoke the image + tag pointers
+        run: |
+          SHORT=${{ steps.pin.outputs.short }}; V=${{ inputs.version }}
+          bash scripts/smoke.sh "$IMAGE:sha-$SHORT"
+          docker tag "$IMAGE:sha-$SHORT" "$IMAGE:$V"
+          docker tag "$IMAGE:sha-$SHORT" "$IMAGE:latest"
+          docker push "$IMAGE:sha-$SHORT"
+          docker push "$IMAGE:$V"
+          docker push "$IMAGE:latest"
+          echo "digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:sha-$SHORT" | cut -d@ -f2)" >> "$GITHUB_ENV"
+
+      - name: GitHub Release with the tarball
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: vyges-openroad ${{ inputs.version }}
+          body: |
+            Mainline OpenROAD, reproducibly built by Vyges.
+            - upstream commit: `${{ steps.pin.outputs.commit }}`
+            - image: `${{ env.IMAGE }}:sha-${{ steps.pin.outputs.short }}` (also `:${{ inputs.version }}`, `:latest`)
+            - image digest: `${{ env.digest }}`
+          files: dist/*.tar.gz
+
+      - name: Append to index.json
+        run: |
+          bash scripts/update-index.sh \
+            "${{ steps.pin.outputs.commit }}" "${{ steps.pin.outputs.short }}" \
+            "${{ inputs.version }}" "${{ env.digest }}" \
+            "https://github.com/${{ github.repository }}/releases/download/${{ inputs.version }}/vyges-openroad-${{ inputs.version }}-g${{ steps.pin.outputs.short }}-linux-x86_64.tar.gz"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.json && git commit -m "index: ${{ inputs.version }} (${{ steps.pin.outputs.short }})" && git push

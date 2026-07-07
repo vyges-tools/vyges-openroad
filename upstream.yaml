@@ -1,0 +1,19 @@
+# vyges-openroad build pin — the source of truth for what we build.
+#
+# Self-contained: this repo vendors nothing in-tree. CI clones OpenROAD at
+# `commit` and BUILDS it. A sync workflow bumps `commit` when OpenROAD `master`
+# advances (opening a PR); merging pins a release.
+upstream:
+  source: https://github.com/The-OpenROAD-Project/OpenROAD
+  ref: master                                      # OpenROAD's default branch is `master`, not `main`
+  commit: b5624809f29048e1f9ce9e83eb562620c652e084 # validated build (openroad -version: 26Q3-104-gb5624809f2)
+  recurse_submodules: true                         # sta, abc, slang-elab
+  updated_at: "2026-07-07T17:33:10Z"
+
+license:
+  spdx: BSD-3-Clause                               # OpenROAD; shipped with the binary as LICENSE.OpenROAD
+
+build:
+  base_image: ubuntu:24.04                         # first-class in OpenROAD DependencyInstaller; glibc 2.39; LTS
+  deps: "etc/DependencyInstaller.sh -all"
+  compile: "etc/Build.sh -no-gui -no-tests"
