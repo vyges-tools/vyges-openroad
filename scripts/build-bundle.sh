@@ -66,6 +66,34 @@ BSD-3-Clause — see LICENSE.OpenROAD. Built by Vyges from commit ${OR_COMMIT}.
 The OpenROAD name and trademarks belong to their respective owners; this build is unaffiliated.
 NOTICE
 
+# MCP-friendliness: a self-describing tool descriptor + tools.json example (the shared
+# vyges-tool-descriptor/1.0 convention, also in vyges-klayout) so the vyges resolve/MCP
+# layer can discover + invoke this backing tool uniformly. Mirrored as com.vyges.tool.* labels.
+cat > "$BUNDLE/vyges-tool.json" <<TOOLJSON
+{
+  "schema": "vyges-tool-descriptor/1.0",
+  "tool": "openroad",
+  "version": "${VERSION}",
+  "kind": "backing-tool",
+  "headless": true,
+  "provides": ["synthesis", "floorplan", "placement", "cts", "routing", "rcx", "sta", "gds-out"],
+  "invoke": { "binary": "openroad", "entrypoint": "openroad" },
+  "env": { "required": ["PDK_ROOT"], "optional": [] },
+  "license": "BSD-3-Clause",
+  "upstream_commit": "${OR_COMMIT}"
+}
+TOOLJSON
+
+cat > "$BUNDLE/tools.json.example" <<'TJ'
+{ "tools": {
+    "openroad": { "container": {
+      "runtime": "docker",
+      "image": "ghcr.io/vyges-tools/vyges-openroad:latest",
+      "mounts": ["${PDK_ROOT}:${PDK_ROOT}:ro"]
+    } }
+} }
+TJ
+
 # Provenance manifest (image_digest + build_date are filled by CI post-build).
 if [ -x "$SCRIPTS_DIR/provenance.sh" ]; then
   OR_COMMIT="$OR_COMMIT" VERSION="$VERSION" "$SCRIPTS_DIR/provenance.sh" > "$BUNDLE/manifest.json" || true

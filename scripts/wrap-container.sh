@@ -13,6 +13,7 @@ NAME="vyges-openroad-${VERSION}-g${SHORT}"
 
 docker build -f Dockerfile.runtime \
   --build-arg BUNDLE_DIR="$NAME" \
+  --build-arg VERSION="$VERSION" \
   -t "${IMAGE}:sha-${SHORT}" \
   "$OUT_DIR"
 
