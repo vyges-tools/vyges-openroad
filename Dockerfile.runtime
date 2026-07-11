@@ -10,6 +10,8 @@ FROM ubuntu:24.04
 # The bundle directory name inside the build context, e.g.
 # vyges-openroad-2026.07.0-gb5624809f290
 ARG BUNDLE_DIR
+# Version string for the vyges tool labels (e.g. 2026.07.0).
+ARG VERSION=dev
 
 COPY ${BUNDLE_DIR} /opt/vyges-openroad
 ENV PATH=/opt/vyges-openroad/bin:$PATH
@@ -17,6 +19,14 @@ ENV PATH=/opt/vyges-openroad/bin:$PATH
 # Fail the build if the wrapped binary does not run on the clean base.
 RUN openroad -version
 
+# Standard OCI labels + vyges-tool descriptor labels (mirror /opt/vyges-openroad/vyges-tool.json)
+# so the vyges resolve/MCP layer can discover this backing tool via `docker inspect`.
 LABEL org.opencontainers.image.title="vyges-openroad" \
       org.opencontainers.image.source="https://github.com/vyges-tools/vyges-openroad" \
-      org.opencontainers.image.description="Mainline OpenROAD, pinned + reproducibly built by Vyges."
+      org.opencontainers.image.description="Mainline OpenROAD, pinned + reproducibly built by Vyges." \
+      com.vyges.tool="openroad" \
+      com.vyges.tool.version="${VERSION}" \
+      com.vyges.tool.kind="backing-tool" \
+      com.vyges.tool.headless="true" \
+      com.vyges.tool.invoke="openroad" \
+      com.vyges.tool.descriptor="/opt/vyges-openroad/vyges-tool.json"
