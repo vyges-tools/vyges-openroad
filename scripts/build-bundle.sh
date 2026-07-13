@@ -26,7 +26,16 @@ git checkout -q "$OR_COMMIT"
 git submodule update --init --recursive
 
 echo "== compile (Build.sh -no-gui -no-tests) =="
-./etc/Build.sh -deps-prefixes-file=/opt/deps-prefixes.txt -no-gui -no-tests -threads="$(nproc)"
+# Upstream made Bazel the default build system (Build.sh: useBazel=yes) and now
+# hard-exits when no bazelisk/bazel launcher is present. This deps image ships the
+# CMake dependency set (or-tools, Boost, ... compiled + recorded in deps-prefixes),
+# so force the CMake path via -cmake-build. The flag only exists on newer commits;
+# add it conditionally so builds of older pinned commits (CMake-default) still work.
+BUILD_FLAGS=(-deps-prefixes-file=/opt/deps-prefixes.txt -no-gui -no-tests -threads="$(nproc)")
+if grep -q -- '-cmake-build' ./etc/Build.sh; then
+  BUILD_FLAGS+=(-cmake-build)
+fi
+./etc/Build.sh "${BUILD_FLAGS[@]}"
 
 OR=$(find /OpenROAD -name openroad -type f -executable | grep -v third-party | head -1)
 [ -n "$OR" ] || { echo "ERROR: built openroad not found"; exit 1; }
