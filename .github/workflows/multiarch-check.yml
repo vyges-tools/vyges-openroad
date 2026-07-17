@@ -1,0 +1,61 @@
+name: multiarch-check
+
+# Verify OpenROAD BUILDS (deps + full compile) on BOTH linux/amd64 and linux/arm64
+# native GitHub-hosted runners (free on a public repo). Self-contained: builds the
+# deps image on-the-fly per arch, then the bundle. No publish. Run before wiring
+# arm64 into release.yml / deps.yml.  NOTE: OpenROAD is a large build — expect ~1h/arch.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    name: build-${{ matrix.arch }}
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm runner arch
+        run: uname -m
+
+      - name: Resolve pin
+        id: pin
+        run: |
+          COMMIT=$(grep -E '^\s*commit:' upstream.yaml | awk '{print $2}')
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "short=$(echo "$COMMIT" | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
+      - name: Free disk space (OpenROAD build tree is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/lib/jvm || true
+          sudo docker image prune -af || true
+          df -h /
+
+      - name: Build deps image for ${{ matrix.arch }} (native)
+        run: docker build --build-arg OR_COMMIT="${{ steps.pin.outputs.commit }}" -t oror-deps:local deps/
+
+      - name: Compile OpenROAD + bundle (arch from uname -m)
+        run: |
+          mkdir -p dist
+          docker run --rm \
+            -e OR_COMMIT="${{ steps.pin.outputs.commit }}" -e VERSION="ci-${{ matrix.arch }}" -e OUT_DIR=/out \
+            -v "$PWD/dist:/out" -v "$PWD/scripts:/scripts:ro" \
+            oror-deps:local bash /scripts/build-bundle.sh
+
+      - name: Smoke (openroad -version on ${{ matrix.arch }})
+        run: bash scripts/smoke.sh "dist/vyges-openroad-ci-${{ matrix.arch }}-g${{ steps.pin.outputs.short }}"
+
+      - name: Result
+        run: |
+          echo "### ${{ matrix.arch }} OpenROAD build OK" >> "$GITHUB_STEP_SUMMARY"
+          ls -la dist/*.tar.gz >> "$GITHUB_STEP_SUMMARY"
