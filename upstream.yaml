@@ -6,9 +6,9 @@
 upstream:
   source: https://github.com/The-OpenROAD-Project/OpenROAD
   ref: master                                      # OpenROAD's default branch is `master`, not `main`
-  commit: 945a9f48dc6e5cc91d865daa92c45a1094cb682c # master tip 2026-08-23; version string set by the build
+  commit: 7d490b8ecd357199c0c0e9f3e32becd5eb507c34 # master tip 2026-09-03 (2 drt commits behind 84e3ff1e); version string set by the build
   recurse_submodules: true                         # sta, abc, slang-elab
-  updated_at: "2026-08-23T00:33:32Z"
+  updated_at: "2026-09-03T16:02:06Z"
 
 license:
   spdx: BSD-3-Clause                               # OpenROAD; shipped with the binary as LICENSE.OpenROAD
