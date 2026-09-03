@@ -4,12 +4,12 @@
     {
       "commit": "7d490b8ecd357199c0c0e9f3e32becd5eb507c34",
       "short": "7d490b8ecd35",
-      "version": "nightly-7d490b8ecd35",
+      "version": "2026.09.0",
       "date": "2026-09-03",
-      "channel": "nightly",
+      "channel": "release",
       "image_ref": "ghcr.io/vyges-tools/vyges-openroad:sha-7d490b8ecd35",
-      "image_digest": "sha256:f36c17f2fbd191bc02c1921533254f2ca234b851a6124f52826155b1e7a5b7bd",
-      "tarball_url": ""
+      "image_digest": "sha256:29aa66ff1909c2702b42cdbc7fb949a52bda5907af22fb51b30737b417b79c48",
+      "tarball_url": "https://github.com/vyges-tools/vyges-openroad/releases/download/2026.09.0/vyges-openroad-2026.09.0-g7d490b8ecd35-linux-x86_64.tar.gz"
     },
     {
       "commit": "e04acef43d7953820d5d5e8111fac05af7d8b2a1",
