@@ -36,29 +36,40 @@ if grep -q -- '-cmake-build' ./etc/Build.sh; then
   BUILD_FLAGS+=(-cmake-build)
 fi
 
-# -no-tests compat shim. Upstream's top-level CMakeLists.txt creates the
-# `build_and_test` custom target only inside `if(ENABLE_TESTS)`, and a module's
-# gtest block is expected to sit behind the same guard -- odb/mpl/rsz guard
-# `add_subdirectory(test)` in the module CMakeLists, grt guards
-# `add_subdirectory(cpp)` inside its test one. A module that adds its test
-# subdirectory unconditionally AND calls `add_dependencies(build_and_test ...)`
-# therefore breaks configure with -no-tests:
+# -no-tests compat shim. A module's gtest block is expected to sit behind
+# `if(ENABLE_TESTS)` -- odb/mpl/rsz guard `add_subdirectory(test)` in the module
+# CMakeLists, grt guards `add_subdirectory(cpp)` inside its test one. A module
+# that adds its test subdirectory unconditionally and then writes a gtest block
+# reaches, with -no-tests, two things upstream creates only under that guard:
+#   build_and_test      top-level CMakeLists.txt, under if(ENABLE_TESTS)
+#   GTest::gtest_main   src/CMakeLists.txt: find_package(GTest REQUIRED), same guard
+# and configure dies twice over:
 #   CMake Error at src/drt/test/CMakeLists.txt:36 (add_dependencies):
 #     Cannot add target-level dependencies to non-existent target "build_and_test"
-# (drt, from OpenROAD PR #11160, merged 2026-09-15 -- broke nightly on 2026-09-16.)
+#   CMake Error at src/drt/test/CMakeLists.txt:34 (target_link_libraries):
+#     Target "WatermarkCostTest" links to: GTest::gtest_main but the target was not found
+# (drt, from OpenROAD PR #11160, merged 2026-09-15 -- broke nightly on 2026-09-16;
+# reported upstream as issue #11427.)
 #
-# Define the target as an empty stub instead of patching the upstream tree, so the
-# bundle stays a build of unmodified sources at $OR_COMMIT. `if(NOT TARGET)` makes
-# it inert the moment upstream restores the guard. Injected via
-# CMAKE_PROJECT_<name>_INCLUDE, which CMake runs at the end of the top-level
-# `project(OpenROAD ...)` -- before `add_subdirectory(src)`, so the target exists
-# by the time any module references it. The flag rides in on Build.sh's `-cmake=`
-# pass-through; older pinned commits without it just build as before.
+# Supply both instead of patching the upstream tree, so the bundle stays a build of
+# unmodified sources at $OR_COMMIT. Injected via CMAKE_PROJECT_<name>_INCLUDE, which
+# CMake runs at the end of the top-level `project(OpenROAD ...)`: that is before
+# `add_subdirectory(src)`, and it is top-level directory scope, so GTest's imported
+# targets are visible in every module subdirectory the way the guarded find_package
+# would make them. `if(NOT ENABLE_TESTS)` makes the whole shim inert the moment
+# upstream restores the guard. The flag rides in on Build.sh's `-cmake=` pass-through;
+# older pinned commits without it just build as before.
 SHIM=/tmp/or-no-tests-compat.cmake
 cat > "$SHIM" <<'SHIMEOF'
-if(NOT ENABLE_TESTS AND NOT TARGET build_and_test)
-  message(STATUS "vyges: stubbing build_and_test (ENABLE_TESTS=OFF)")
-  add_custom_target(build_and_test)
+if(NOT ENABLE_TESTS)
+  if(NOT TARGET build_and_test)
+    message(STATUS "vyges: stubbing build_and_test (ENABLE_TESTS=OFF)")
+    add_custom_target(build_and_test)
+  endif()
+  # Not REQUIRED: absent GTest is not itself an error here, and the module that
+  # wanted it reports a clearer one than a failed find_package would.
+  find_package(GTest QUIET)
+  message(STATUS "vyges: GTest for unguarded module tests: GTest_FOUND=${GTest_FOUND}")
 endif()
 SHIMEOF
 if grep -q -- '-cmake=\*)' ./etc/Build.sh; then
