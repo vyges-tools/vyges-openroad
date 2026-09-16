@@ -35,6 +35,38 @@ BUILD_FLAGS=(-deps-prefixes-file=/opt/deps-prefixes.txt -no-gui -no-tests -threa
 if grep -q -- '-cmake-build' ./etc/Build.sh; then
   BUILD_FLAGS+=(-cmake-build)
 fi
+
+# -no-tests compat shim. Upstream's top-level CMakeLists.txt creates the
+# `build_and_test` custom target only inside `if(ENABLE_TESTS)`, and a module's
+# gtest block is expected to sit behind the same guard -- odb/mpl/rsz guard
+# `add_subdirectory(test)` in the module CMakeLists, grt guards
+# `add_subdirectory(cpp)` inside its test one. A module that adds its test
+# subdirectory unconditionally AND calls `add_dependencies(build_and_test ...)`
+# therefore breaks configure with -no-tests:
+#   CMake Error at src/drt/test/CMakeLists.txt:36 (add_dependencies):
+#     Cannot add target-level dependencies to non-existent target "build_and_test"
+# (drt, from OpenROAD PR #11160, merged 2026-09-15 -- broke nightly on 2026-09-16.)
+#
+# Define the target as an empty stub instead of patching the upstream tree, so the
+# bundle stays a build of unmodified sources at $OR_COMMIT. `if(NOT TARGET)` makes
+# it inert the moment upstream restores the guard. Injected via
+# CMAKE_PROJECT_<name>_INCLUDE, which CMake runs at the end of the top-level
+# `project(OpenROAD ...)` -- before `add_subdirectory(src)`, so the target exists
+# by the time any module references it. The flag rides in on Build.sh's `-cmake=`
+# pass-through; older pinned commits without it just build as before.
+SHIM=/tmp/or-no-tests-compat.cmake
+cat > "$SHIM" <<'SHIMEOF'
+if(NOT ENABLE_TESTS AND NOT TARGET build_and_test)
+  message(STATUS "vyges: stubbing build_and_test (ENABLE_TESTS=OFF)")
+  add_custom_target(build_and_test)
+endif()
+SHIMEOF
+if grep -q -- '-cmake=\*)' ./etc/Build.sh; then
+  BUILD_FLAGS+=(-cmake="-DCMAKE_PROJECT_OpenROAD_INCLUDE=$SHIM")
+else
+  echo "WARNING: Build.sh has no -cmake= pass-through; skipping no-tests compat shim"
+fi
+
 ./etc/Build.sh "${BUILD_FLAGS[@]}"
 
 OR=$(find /OpenROAD -name openroad -type f -executable | grep -v third-party | head -1)
