@@ -25,6 +25,10 @@ git fetch --depth 1 origin "$OR_COMMIT" 2>/dev/null || git fetch origin
 git checkout -q "$OR_COMMIT"
 git submodule update --init --recursive
 
+# ------------------------------------------------------------------ CMake path
+# Kept verbatim as a function so the -no-tests compat heredoc below is not
+# re-indented or otherwise disturbed by the dispatch added above it.
+compile_cmake() {
 echo "== compile (Build.sh -no-gui -no-tests) =="
 # Upstream made Bazel the default build system (Build.sh: useBazel=yes) and now
 # hard-exits when no bazelisk/bazel launcher is present. This deps image ships the
@@ -79,8 +83,49 @@ else
 fi
 
 ./etc/Build.sh "${BUILD_FLAGS[@]}"
+}
 
-OR=$(find /OpenROAD -name openroad -type f -executable | grep -v third-party | head -1)
+# ---------------------------------------------------------------- build system
+# ⛔ Upstream made Bazel the default in etc/Build.sh at d29f14a2 (2026-07-12),
+# deprecated -bazel with a warning, and maliberty on issue #11427: "cmake is
+# headed for deprecation soon ... I would suggest moving to bazel." No date was
+# given, so CMake is being left to rot rather than cut - which is exactly how
+# #11427 was found. We follow upstream for the OPENROAD build only; our own
+# Rust/cargo infrastructure is unaffected and is NOT moving to Bazel.
+#
+#   OR_BUILD_SYSTEM=bazel  (default)  | cmake  (retained fallback)
+#
+# ⚠️ The CMake path is kept deliberately, not as dead code. It is what lets a
+# build of an OLDER pinned commit still work, and it is the control if a Bazel
+# build ever produces a binary that differs from the one we have been shipping.
+OR_BUILD_SYSTEM="${OR_BUILD_SYSTEM:-bazel}"
+
+if [ "$OR_BUILD_SYSTEM" = "bazel" ]; then
+  echo "== compile (bazel: --config=release --//:platform=cli //:openroad) =="
+  BZL=$(command -v bazelisk || command -v bazel || true)
+  [ -n "$BZL" ] || { echo "ERROR: OR_BUILD_SYSTEM=bazel but no bazelisk/bazel on PATH"; exit 1; }
+
+  # --//:platform=cli is upstream's OWN mapping of -no-gui: BUILD.bazel declares a
+  # `platform` string_flag with config_settings platform_cli / platform_gui, and
+  # //:openroad (as against //:openroad-qt) is the CLI binary.
+  #
+  # ⛔ No -no-tests equivalent is needed, and no compat shim. The CMake path
+  # carries one because ENABLE_TESTS=OFF reaches targets upstream creates only
+  # under if(ENABLE_TESTS) - issue #11427, our PR #11435 still open. Bazel
+  # configures only the requested target's dependency graph, so those test
+  # targets are never reached and the whole class of breakage does not arise.
+  # That is a reason to prefer this path, not merely conformity with upstream.
+  "$BZL" build --config=release --//:platform=cli //:openroad
+
+  # bazel-bin is a symlink into the output base, so resolve it: the bundle copies
+  # a real file and then reads its ldd closure.
+  OR=$(readlink -f bazel-bin/openroad)
+else
+  compile_cmake
+  OR=$(find /OpenROAD -name openroad -type f -executable | grep -v third-party | head -1)
+fi
+
+
 [ -n "$OR" ] || { echo "ERROR: built openroad not found"; exit 1; }
 "$OR" -version
 

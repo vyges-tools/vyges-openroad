@@ -6,14 +6,30 @@
 upstream:
   source: https://github.com/The-OpenROAD-Project/OpenROAD
   ref: master                                      # OpenROAD's default branch is `master`, not `main`
-  commit: 7d490b8ecd357199c0c0e9f3e32becd5eb507c34 # master tip 2026-09-03 (2 drt commits behind 84e3ff1e); version string set by the build
+  commit: da9f29f18b6487825aa880597176e0fa97110b31 # nightly-da9f29f18b64, 2026-09-19 (4 behind master tip 952a5be8); version string set by the build
+  # ⛔ REQUIRED BY BOTH build systems, measured 2026-09-19 — not a CMake-only step.
+  # A Bazel build of a tree without them fails in ANALYSIS, before any compile:
+  #   ERROR: no such package 'src/sta': BUILD file not found ...
+  #   ERROR: /BUILD.bazel:212:10: no such package 'src/sta'
+  # src/sta is the OpenSTA submodule and carries its own BUILD.bazel, so MODULE.bazel
+  # does NOT stand in for it. (This line previously claimed the opposite; the trial
+  # build falsified it.)
   recurse_submodules: true                         # sta, abc, slang-elab
-  updated_at: "2026-09-03T16:02:06Z"
+  updated_at: "2026-09-19T16:35:45Z"
 
 license:
   spdx: BSD-3-Clause                               # OpenROAD; shipped with the binary as LICENSE.OpenROAD
 
 build:
   base_image: ubuntu:24.04                         # first-class in OpenROAD DependencyInstaller; glibc 2.39; LTS
-  deps: "etc/DependencyInstaller.sh -all"
-  compile: "etc/Build.sh -no-gui -no-tests"
+  # ⛔ BAZEL is the build system for OpenROAD from 2026-09-19. Upstream defaulted
+  # etc/Build.sh to it at d29f14a2 (2026-07-12) and is retiring CMake without a
+  # date — leaving it to rot, which is how issue #11427 was found. This applies to
+  # the OPENROAD build ONLY; our Rust/cargo infrastructure is not moving.
+  build_system: bazel                              # scripts/build-bundle.sh: OR_BUILD_SYSTEM
+  deps: "resolved by MODULE.bazel (BCR-pinned, lockfile-enforced upstream)"
+  compile: "bazelisk build --config=release --//:platform=cli //:openroad"
+  # Retained fallback, selected with OR_BUILD_SYSTEM=cmake. Needed to build an
+  # OLDER pinned commit, and it is the control if a Bazel binary ever differs.
+  compile_cmake: "etc/Build.sh -no-gui -no-tests -cmake-build"
+  deps_cmake: "etc/DependencyInstaller.sh -all"
