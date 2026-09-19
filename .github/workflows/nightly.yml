@@ -57,8 +57,15 @@ jobs:
           SHORT: ${{ steps.head.outputs.short }}
         run: |
           mkdir -p dist
+          # ⛔ OR_BUILD_SYSTEM is pinned to cmake here ON PURPOSE, for ONE cycle.
+          # build-bundle.sh defaults to bazel; the nightly is the channel that tells us
+          # UPSTREAM broke, and changing the build system underneath it removes that
+          # signal at the moment it is most needed. Flip this to bazel (or just delete
+          # the line) once release.yml has built bazel green on BOTH x86_64 and arm64 —
+          # arm64 is the unmeasured one: upstream CI proves macOS and x86_64 only.
           docker run --rm \
             -e OR_COMMIT="${{ steps.head.outputs.commit }}" -e VERSION="$VERSION" -e OUT_DIR=/out \
+            -e OR_BUILD_SYSTEM=cmake \
             -v "$PWD/dist:/out" -v "$PWD/scripts:/scripts:ro" \
             "$DEPS_IMAGE:latest" bash /scripts/build-bundle.sh
           bash scripts/smoke.sh "dist/vyges-openroad-$VERSION-g$SHORT"

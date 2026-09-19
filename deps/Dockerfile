@@ -25,3 +25,17 @@ RUN git clone https://github.com/The-OpenROAD-Project/OpenROAD.git /OpenROAD \
 # Install (and compile-from-source) all build + runtime deps; record their
 # prefixes so Build.sh can find the non-standard ones (or-tools, etc.).
 RUN cd /OpenROAD && ./etc/DependencyInstaller.sh -all -save-deps-prefixes=/opt/deps-prefixes.txt
+
+# ⛔ bazelisk, so ONE image can build either path. Upstream is retiring CMake, and
+# build-bundle.sh now defaults to OR_BUILD_SYSTEM=bazel; without a launcher here the
+# bundle step hard-exits with "no bazelisk/bazel on PATH".
+# ℹ️ Bazel resolves its own dependencies through MODULE.bazel (BCR-pinned), so the
+# DependencyInstaller set above is NOT used by the Bazel path. It is kept because the
+# CMake fallback needs it and because it builds older pinned commits. Once the Bazel
+# path has shipped, the Bazel build does not need this image at all — only git and a
+# launcher — which is a simplification worth taking separately, not here.
+RUN curl -fsSL -o /usr/local/bin/bazelisk \
+      https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-linux-$(dpkg --print-architecture) \
+    && chmod +x /usr/local/bin/bazelisk \
+    && ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel \
+    && bazelisk version || true
