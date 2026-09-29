@@ -93,12 +93,14 @@ fi
 # #11427 was found. We follow upstream for the OPENROAD build only; our own
 # Rust/cargo infrastructure is unaffected and is NOT moving to Bazel.
 #
-#   OR_BUILD_SYSTEM=bazel  (default)  | cmake  (retained fallback)
+#   OR_BUILD_SYSTEM=cmake  (default on main)  | bazel  (the `bazel` branch)
 #
-# ⚠️ The CMake path is kept deliberately, not as dead code. It is what lets a
-# build of an OLDER pinned commit still work, and it is the control if a Bazel
-# build ever produces a binary that differs from the one we have been shipping.
-OR_BUILD_SYSTEM="${OR_BUILD_SYSTEM:-bazel}"
+# ⛔ main builds with CMake because the Bazel //:openroad has NO PYTHON
+# (BUILD_PYTHON=false hardcoded upstream, still so on master 2026-09-29), and
+# LibreLane runs every odb step as `openroad -python`. The Bazel default lives on
+# the `bazel` branch until upstream's Bazel binary carries Python; the Python guard
+# below refuses a Python-less binary on either branch.
+OR_BUILD_SYSTEM="${OR_BUILD_SYSTEM:-cmake}"
 
 if [ "$OR_BUILD_SYSTEM" = "bazel" ]; then
   echo "== compile (bazel: --config=release --//:platform=cli //:openroad) =="

@@ -26,8 +26,8 @@ build:
   # etc/Build.sh to it at d29f14a2 (2026-07-12) and is retiring CMake without a
   # date — leaving it to rot, which is how issue #11427 was found. This applies to
   # the OPENROAD build ONLY; our Rust/cargo infrastructure is not moving.
-  build_system: bazel                              # scripts/build-bundle.sh: OR_BUILD_SYSTEM
-  # ⛔ BUT the SHIPPED bundle is still CMake (nightly + release pin OR_BUILD_SYSTEM=cmake).
+  build_system: cmake                              # scripts/build-bundle.sh: OR_BUILD_SYSTEM; bazel = the `bazel` branch
+  # ⛔ main is CMake (2026-09-29); the Bazel default lives on the `bazel` branch.
   # Measured 2026-09-28 at this commit: the Bazel //:openroad is byte-identical to CMake
   # on the whole pdn suite (168/168 exit codes, 127/127 result files) and needs only
   # glibc >= 2.27 with libstdc++ static (CMake: glibc >= 2.39) — but it has NO PYTHON
