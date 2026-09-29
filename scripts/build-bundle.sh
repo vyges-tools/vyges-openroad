@@ -129,6 +129,29 @@ fi
 [ -n "$OR" ] || { echo "ERROR: built openroad not found"; exit 1; }
 "$OR" -version
 
+# ⛔ The binary must carry PYTHON, or the bundle is refused. LibreLane launches
+# `openroad -python` for every odb step (steps/odb.py, steps/openroad.py), so a
+# binary without it breaks those users while every Tcl-driven check stays green.
+# Measured 2026-09-28 at da9f29f: the Bazel `//:openroad` hardcodes
+# BUILD_PYTHON=false (and GPU=false) in OPENROAD_DEFINES, and prints
+# "-GPU -GUI -Python"; Python exists there only as the `//:openroad_py`
+# extension module. On the pdn suite it is otherwise byte-identical to the CMake
+# build (168/168 exit codes, 127/127 result files) — this banner is the ONLY
+# difference, which is why a gate cannot be relied on to catch it.
+# OR_REQUIRE_PYTHON=0 builds a Tcl-only bundle deliberately.
+if [ "${OR_REQUIRE_PYTHON:-1}" = "1" ]; then
+  EMPTY_TCL=$(mktemp --suffix=.tcl)
+  FEATURES=$("$OR" -no_init -exit "$EMPTY_TCL" 2>&1 | grep -m1 "Features included" || true)
+  rm -f "$EMPTY_TCL"
+  echo "features: $FEATURES"
+  case "$FEATURES" in
+    *+Python*) ;;
+    *) echo "ERROR: built openroad has no Python ($FEATURES); LibreLane needs 'openroad -python'."
+       echo "       Build with OR_BUILD_SYSTEM=cmake, or set OR_REQUIRE_PYTHON=0 for a Tcl-only bundle."
+       exit 1 ;;
+  esac
+fi
+
 SHORT=$(echo "$OR_COMMIT" | cut -c1-12)
 NAME="vyges-openroad-${VERSION}-g${SHORT}"
 BUNDLE="$OUT_DIR/$NAME"

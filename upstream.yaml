@@ -27,6 +27,12 @@ build:
   # date — leaving it to rot, which is how issue #11427 was found. This applies to
   # the OPENROAD build ONLY; our Rust/cargo infrastructure is not moving.
   build_system: bazel                              # scripts/build-bundle.sh: OR_BUILD_SYSTEM
+  # ⛔ BUT the SHIPPED bundle is still CMake (nightly + release pin OR_BUILD_SYSTEM=cmake).
+  # Measured 2026-09-28 at this commit: the Bazel //:openroad is byte-identical to CMake
+  # on the whole pdn suite (168/168 exit codes, 127/127 result files) and needs only
+  # glibc >= 2.27 with libstdc++ static (CMake: glibc >= 2.39) — but it has NO PYTHON
+  # (BUILD_PYTHON=false hardcoded; banner "-GPU -GUI -Python"), and LibreLane launches
+  # `openroad -python`. build-bundle.sh refuses such a binary (OR_REQUIRE_PYTHON=0 overrides).
   deps: "resolved by MODULE.bazel (BCR-pinned, lockfile-enforced upstream)"
   compile: "bazelisk build --config=release --//:platform=cli //:openroad"
   # Retained fallback, selected with OR_BUILD_SYSTEM=cmake. Needed to build an

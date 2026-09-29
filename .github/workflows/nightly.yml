@@ -63,6 +63,9 @@ jobs:
           # signal at the moment it is most needed. Flip this to bazel (or just delete
           # the line) once release.yml has built bazel green on BOTH x86_64 and arm64 —
           # arm64 is the unmeasured one: upstream CI proves macOS and x86_64 only.
+          # ⛔ AND once upstream's Bazel binary carries Python (2026-09-28: it does not —
+          # BUILD_PYTHON=false at da9f29f; LibreLane needs `openroad -python`, and
+          # build-bundle.sh refuses a Python-less binary). See release.yml.
           docker run --rm \
             -e OR_COMMIT="${{ steps.head.outputs.commit }}" -e VERSION="$VERSION" -e OUT_DIR=/out \
             -e OR_BUILD_SYSTEM=cmake \

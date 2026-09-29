@@ -13,6 +13,17 @@ ARG BUNDLE_DIR
 # Version string for the vyges tool labels (e.g. 2026.07.0).
 ARG VERSION=dev
 
+# ⛔ The Python STANDARD LIBRARY, which the bundle cannot carry: it ships
+# libpython3.12.so, but the embedded interpreter loads its stdlib from
+# /usr/lib/python3.12 at startup. Without it `openroad -python` comes up
+# half-initialised ("Could not find platform independent libraries", then
+# `open` undefined, `sys.stdout` lost) — and LibreLane runs every odb step as
+# `openroad -python`. Found 2026-09-28 on the published da9f29f image; the
+# smoke only ran `-version`, which never starts the interpreter. (+~17 MB)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libpython3.12-stdlib \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY ${BUNDLE_DIR} /opt/vyges-openroad
 ENV PATH=/opt/vyges-openroad/bin:$PATH
 
