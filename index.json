@@ -2,6 +2,16 @@
   "schema": "vyges-openroad-index/1.0",
   "builds": [
     {
+      "commit": "68b10dce198204e41f39f8ea383dbfc293525d84",
+      "short": "68b10dce1982",
+      "version": "nightly-68b10dce1982",
+      "date": "2026-10-11",
+      "channel": "nightly",
+      "image_ref": "ghcr.io/vyges-tools/vyges-openroad:sha-68b10dce1982",
+      "image_digest": "sha256:e08e8ff591759ec8910027a66f7a3cd12c7071956c19de4abcf05b4b5424669e",
+      "tarball_url": ""
+    },
+    {
       "commit": "8a05d8549b295e8bb84be52d1e3b3d323e539375",
       "short": "8a05d8549b29",
       "version": "nightly-8a05d8549b29",
