@@ -1,38 +1,94 @@
 name: multiarch-check
 
-# Verify OpenROAD BUILDS (deps + full compile) on BOTH linux/amd64 and linux/arm64
-# native GitHub-hosted runners (free on a public repo). Self-contained: builds the
-# deps image on-the-fly per arch, then the bundle. No publish. Run before wiring
-# arm64 into release.yml / deps.yml.  NOTE: OpenROAD is a large build — expect ~1h/arch.
+# Verify OpenROAD BUILDS (full compile + bundle + smoke) on native GitHub-hosted
+# linux/amd64 and/or linux/arm64 runners (free on a public repo). Self-contained:
+# builds its build-env image on the fly per arch, then the bundle. No publish.
+# Run before wiring an arch or build system into release.yml / nightly.yml.
+#
+# ⛔ Defaults = Bazel, arm64, OpenROAD master HEAD (2026-11-02). Upstream removed the
+# CMake build on master that day; the nightly proves Bazel on x86_64 only, and
+# upstream CI proves macOS + x86_64 only, so arm64 + Bazel is the unmeasured cell
+# that release.yml will need at the next repin.
+#   bazel -> deps/Dockerfile.bazel (git + bazelisk; MODULE.bazel resolves deps)
+#   cmake -> deps/Dockerfile (DependencyInstaller set); OLDER pins only — master has no CMake.
 
 on:
   workflow_dispatch:
+    inputs:
+      arch:
+        description: Which runner arch(es) to build on
+        type: choice
+        options: [aarch64, x86_64, both]
+        default: aarch64
+      build_system:
+        description: OpenROAD build system (cmake works only on commits before 2026-11-02)
+        type: choice
+        options: [bazel, cmake]
+        default: bazel
+      commit:
+        description: OpenROAD commit to build — empty = master HEAD, 'pin' = upstream.yaml
+        type: string
+        default: ''
 
 jobs:
+  plan:
+    runs-on: ubuntu-${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      commit: ${{ steps.c.outputs.commit }}
+      short: ${{ steps.c.outputs.short }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve commit
+        id: c
+        env:
+          REQ: ${{ inputs.commit }}
+        run: |
+          case "$REQ" in
+            '')  COMMIT=$(git ls-remote https://github.com/The-OpenROAD-Project/OpenROAD.git HEAD | awk '{print $1}') ;;
+            pin) COMMIT=$(grep -E '^\s*commit:' upstream.yaml | awk '{print $2}') ;;
+            *)   COMMIT="$REQ" ;;
+          esac
+          [ -n "$COMMIT" ] || { echo "could not resolve commit"; exit 1; }
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "short=$(echo "$COMMIT" | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          echo "OpenROAD $COMMIT (${{ inputs.build_system }})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Select arches
+        id: m
+        env:
+          ARCH: ${{ inputs.arch }}
+          UBU: ${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}
+        run: |
+          x86="{\"runner\":\"ubuntu-$UBU\",\"arch\":\"x86_64\"}"
+          arm="{\"runner\":\"ubuntu-$UBU-arm\",\"arch\":\"aarch64\"}"
+          case "$ARCH" in
+            x86_64)  inc="[$x86]" ;;
+            aarch64) inc="[$arm]" ;;
+            both)    inc="[$x86,$arm]" ;;
+          esac
+          echo "matrix={\"include\":$inc}" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}
-            arch: x86_64
-          - runner: ubuntu-${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}-arm
-            arch: aarch64
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
-    name: build-${{ matrix.arch }}
+    name: build-${{ matrix.arch }}-${{ inputs.build_system }}
     timeout-minutes: 300
+    env:
+      COMMIT: ${{ needs.plan.outputs.commit }}
+      SHORT: ${{ needs.plan.outputs.short }}
+      BUILD_SYSTEM: ${{ inputs.build_system }}
     steps:
       - uses: actions/checkout@v7
 
       - name: Confirm runner arch
-        run: uname -m
-
-      - name: Resolve pin
-        id: pin
         run: |
-          COMMIT=$(grep -E '^\s*commit:' upstream.yaml | awk '{print $2}')
-          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
-          echo "short=$(echo "$COMMIT" | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          uname -m
+          [ "$(uname -m)" = "${{ matrix.arch }}" ] || { echo "runner is not ${{ matrix.arch }}"; exit 1; }
 
       - name: Free disk space (OpenROAD build tree is large)
         run: |
@@ -41,21 +97,27 @@ jobs:
           sudo docker image prune -af || true
           df -h /
 
-      - name: Build deps image for ${{ matrix.arch }} (native)
-        run: docker build --build-arg OR_COMMIT="${{ steps.pin.outputs.commit }}" -t oror-deps:local deps/
+      - name: Build build-env image for ${{ matrix.arch }} (native)
+        run: |
+          if [ "$BUILD_SYSTEM" = bazel ]; then DF=deps/Dockerfile.bazel; else DF=deps/Dockerfile; fi
+          docker build -f "$DF" --build-arg OR_COMMIT="$COMMIT" -t oror-deps:local deps/
 
       - name: Compile OpenROAD + bundle (arch from uname -m)
         run: |
           mkdir -p dist
+          # OR_REQUIRE_PYTHON=0 for bazel: //:openroad has no `-python`; Python under
+          # Bazel is the openroad wheel in a venv (OpenROAD#11566). See nightly.yml.
+          PY=1; [ "$BUILD_SYSTEM" = bazel ] && PY=0
           docker run --rm \
-            -e OR_COMMIT="${{ steps.pin.outputs.commit }}" -e VERSION="ci-${{ matrix.arch }}" -e OUT_DIR=/out \
+            -e OR_COMMIT="$COMMIT" -e VERSION="ci-${{ matrix.arch }}" -e OUT_DIR=/out \
+            -e OR_BUILD_SYSTEM="$BUILD_SYSTEM" -e OR_REQUIRE_PYTHON="$PY" \
             -v "$PWD/dist:/out" -v "$PWD/scripts:/scripts:ro" \
             oror-deps:local bash /scripts/build-bundle.sh
 
-      - name: Smoke (openroad -version on ${{ matrix.arch }})
-        run: bash scripts/smoke.sh "dist/vyges-openroad-ci-${{ matrix.arch }}-g${{ steps.pin.outputs.short }}"
+      - name: Smoke (relocated bundle on ${{ matrix.arch }})
+        run: bash scripts/smoke.sh "dist/vyges-openroad-ci-${{ matrix.arch }}-g$SHORT"
 
       - name: Result
         run: |
-          echo "### ${{ matrix.arch }} OpenROAD build OK" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ${{ matrix.arch }} OpenROAD $SHORT ($BUILD_SYSTEM) build OK" >> "$GITHUB_STEP_SUMMARY"
           ls -la dist/*.tar.gz >> "$GITHUB_STEP_SUMMARY"

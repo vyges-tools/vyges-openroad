@@ -1,0 +1,31 @@
+# Bazel build-env: ubuntu:24.04 + git + bazelisk + the OpenROAD tree. Nothing else.
+#
+# The Bazel path does not use the DependencyInstaller set that deps/Dockerfile spends
+# most of its time compiling (or-tools, Boost, ...): MODULE.bazel resolves every
+# dependency (BCR-pinned, lockfile-enforced upstream) and the C/C++ toolchain is
+# hermetic. So a Bazel build needs only a launcher, git (stamping + submodules), and
+# the tools build-bundle.sh itself calls (ldd, tar). Upstream removed CMake on master
+# 2026-11-02, so deps/Dockerfile's DependencyInstaller step is CMake-era baggage there.
+#
+# Used by multiarch-check.yml for OR_BUILD_SYSTEM=bazel. Layout matches deps/Dockerfile
+# (/OpenROAD checked out at OR_COMMIT) so scripts/build-bundle.sh runs unchanged.
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-c"]
+
+ARG OR_COMMIT
+ARG BAZELISK_VERSION=v1.27.0
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git ca-certificates curl python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL -o /usr/local/bin/bazelisk \
+      "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-$(dpkg --print-architecture)" \
+    && chmod +x /usr/local/bin/bazelisk \
+    && ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
+
+RUN git clone https://github.com/The-OpenROAD-Project/OpenROAD.git /OpenROAD \
+ && cd /OpenROAD \
+ && git checkout "${OR_COMMIT}" \
+ && git submodule update --init --recursive
