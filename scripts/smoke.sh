@@ -26,12 +26,27 @@ PY
   echo "python: ok"
 }
 
+# The Bazel //:openroad is built without Python (banner "-Python"); Python under
+# Bazel is the openroad wheel in a venv (OpenROAD#11566). Require the -python run
+# only of a binary that CLAIMS Python, so a Python build with a broken stdlib still
+# fails here.
+has_python() { # dir visible to openroad; "$@" runs openroad
+  local d=$1 f; shift
+  : > "$d/empty.tcl"
+  f=$("$@" -no_init -exit "$d/empty.tcl" 2>&1 | grep -m1 "Features included" || true)
+  rm -f "$d/empty.tcl"
+  echo "features: ${f:-<no banner>}" >&2
+  case "$f" in *+Python*) return 0 ;; *) return 1 ;; esac
+}
+
 if [ -d "$TARGET" ]; then
   tmp=$(mktemp -d)
   cp -a "$TARGET" "$tmp/bundle"
   "$tmp/bundle/bin/openroad" -version
   # The tarball bundle takes the Python STDLIB from the host (as it does glibc).
-  if [ -d /usr/lib/python3.12 ]; then
+  if ! has_python "$tmp" "$tmp/bundle/bin/openroad"; then
+    echo "python: SKIPPED — binary built without Python"
+  elif [ -d /usr/lib/python3.12 ]; then
     pysmoke "$tmp" "$tmp/bundle/bin/openroad" -no_splash -exit -python
   else
     echo "python: SKIPPED — this host has no /usr/lib/python3.12 (the bundle's host requirement)"
@@ -40,7 +55,11 @@ if [ -d "$TARGET" ]; then
 else
   docker run --rm "$TARGET" openroad -version
   tmp=$(mktemp -d)
-  pysmoke "$tmp" docker run --rm -v "$tmp:$tmp" "$TARGET" openroad -no_splash -exit -python
+  if ! has_python "$tmp" docker run --rm -v "$tmp:$tmp" "$TARGET" openroad; then
+    echo "python: SKIPPED — binary built without Python"
+  else
+    pysmoke "$tmp" docker run --rm -v "$tmp:$tmp" "$TARGET" openroad -no_splash -exit -python
+  fi
   rm -rf "$tmp"
 fi
 echo "SMOKE_OK"

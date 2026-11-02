@@ -46,6 +46,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Free disk space
+        if: steps.head.outputs.already == 'false'
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/lib/jvm || true
+          df -h /
+
       - name: Ensure deps base
         if: steps.head.outputs.already == 'false'
         run: docker pull "$DEPS_IMAGE:latest" || { echo "deps base missing — run the deps-base workflow"; exit 1; }
@@ -57,18 +64,15 @@ jobs:
           SHORT: ${{ steps.head.outputs.short }}
         run: |
           mkdir -p dist
-          # ⛔ OR_BUILD_SYSTEM is pinned to cmake here ON PURPOSE, for ONE cycle.
-          # build-bundle.sh defaults to bazel; the nightly is the channel that tells us
-          # UPSTREAM broke, and changing the build system underneath it removes that
-          # signal at the moment it is most needed. Flip this to bazel (or just delete
-          # the line) once release.yml has built bazel green on BOTH x86_64 and arm64 —
-          # arm64 is the unmeasured one: upstream CI proves macOS and x86_64 only.
-          # ⛔ AND once upstream's Bazel binary carries Python (2026-09-28: it does not —
-          # BUILD_PYTHON=false at da9f29f; LibreLane needs `openroad -python`, and
-          # build-bundle.sh refuses a Python-less binary). See release.yml.
+          # ⛔ BAZEL since 2026-11-02: upstream DELETED the CMake build (Build.sh now
+          # errors "-cmake-build: the CMake build was removed"), first seen on master
+          # f3d27840b65a. The nightly tracks master, so it has no CMake to fall back to.
+          # OR_REQUIRE_PYTHON=0: the Bazel //:openroad has no `-python`; Python under
+          # Bazel is //python/openroad:openroad_wheel in a venv (OpenROAD#11566, closed
+          # 2026-10-07). smoke.sh checks `-python` only when the banner claims Python.
           docker run --rm \
             -e OR_COMMIT="${{ steps.head.outputs.commit }}" -e VERSION="$VERSION" -e OUT_DIR=/out \
-            -e OR_BUILD_SYSTEM=cmake \
+            -e OR_BUILD_SYSTEM=bazel -e OR_REQUIRE_PYTHON=0 \
             -v "$PWD/dist:/out" -v "$PWD/scripts:/scripts:ro" \
             "$DEPS_IMAGE:latest" bash /scripts/build-bundle.sh
           bash scripts/smoke.sh "dist/vyges-openroad-$VERSION-g$SHORT"
