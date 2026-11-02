@@ -117,7 +117,10 @@ if [ "$OR_BUILD_SYSTEM" = "bazel" ]; then
   # configures only the requested target's dependency graph, so those test
   # targets are never reached and the whole class of breakage does not arise.
   # That is a reason to prefer this path, not merely conformity with upstream.
-  "$BZL" build --config=release --//:platform=cli //:openroad
+  # OR_BAZEL_FLAGS: extra flags, word-split on purpose (e.g. "--keep_going" to list every
+  # failing target in one run rather than stop at the first — how arm64 was surveyed).
+  # shellcheck disable=SC2086
+  "$BZL" build --config=release --//:platform=cli ${OR_BAZEL_FLAGS:-} //:openroad
 
   # bazel-bin is a symlink into the output base, so resolve it: the bundle copies
   # a real file and then reads its ldd closure.

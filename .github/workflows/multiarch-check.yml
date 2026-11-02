@@ -29,6 +29,10 @@ on:
         description: OpenROAD commit to build — empty = master HEAD, 'pin' = upstream.yaml
         type: string
         default: ''
+      bazel_flags:
+        description: Extra bazel build flags (e.g. --keep_going to list every failing target)
+        type: string
+        default: ''
 
 jobs:
   plan:
@@ -82,6 +86,7 @@ jobs:
       COMMIT: ${{ needs.plan.outputs.commit }}
       SHORT: ${{ needs.plan.outputs.short }}
       BUILD_SYSTEM: ${{ inputs.build_system }}
+      OR_BAZEL_FLAGS: ${{ inputs.bazel_flags }}
     steps:
       - uses: actions/checkout@v7
 
@@ -110,7 +115,7 @@ jobs:
           PY=1; [ "$BUILD_SYSTEM" = bazel ] && PY=0
           docker run --rm \
             -e OR_COMMIT="$COMMIT" -e VERSION="ci-${{ matrix.arch }}" -e OUT_DIR=/out \
-            -e OR_BUILD_SYSTEM="$BUILD_SYSTEM" -e OR_REQUIRE_PYTHON="$PY" \
+            -e OR_BUILD_SYSTEM="$BUILD_SYSTEM" -e OR_REQUIRE_PYTHON="$PY" -e OR_BAZEL_FLAGS \
             -v "$PWD/dist:/out" -v "$PWD/scripts:/scripts:ro" \
             oror-deps:local bash /scripts/build-bundle.sh
 
