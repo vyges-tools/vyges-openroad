@@ -6,7 +6,7 @@
 upstream:
   source: https://github.com/The-OpenROAD-Project/OpenROAD
   ref: master                                      # OpenROAD's default branch is `master`, not `main`
-  commit: 27288f5c90265ae5296b2f5a9fa6e8714fa191ad # nightly-27288f5c9026, 2026-10-01 (upstream 26Q4 c4d317e + 6 neutral commits); version string set by the build
+  commit: 4155ac31014923e0fa721b691d222511adc7d8c3 # nightly-4155ac310149, 2026-11-03; version string set by the build
   # ⛔ REQUIRED BY BOTH build systems, measured 2026-09-19 — not a CMake-only step.
   # A Bazel build of a tree without them fails in ANALYSIS, before any compile:
   #   ERROR: no such package 'src/sta': BUILD file not found ...
@@ -15,7 +15,7 @@ upstream:
   # does NOT stand in for it. (This line previously claimed the opposite; the trial
   # build falsified it.)
   recurse_submodules: true                         # sta, abc, slang-elab
-  updated_at: "2026-10-11T23:28:14Z"
+  updated_at: "2026-11-03T16:02:43Z"
 
 license:
   spdx: BSD-3-Clause                               # OpenROAD; shipped with the binary as LICENSE.OpenROAD
@@ -26,8 +26,10 @@ build:
   # etc/Build.sh to it at d29f14a2 (2026-07-12) and is retiring CMake without a
   # date — leaving it to rot, which is how issue #11427 was found. This applies to
   # the OPENROAD build ONLY; our Rust/cargo infrastructure is not moving.
-  build_system: cmake                              # scripts/build-bundle.sh: OR_BUILD_SYSTEM; bazel = the `bazel` branch
-  # ⛔ main is CMake (2026-09-29); the Bazel default lives on the `bazel` branch.
+  build_system: bazel                              # scripts/build-bundle.sh: OR_BUILD_SYSTEM
+  # ⛔ BAZEL from the 4155ac31 pin (2026-11-03): upstream deleted its CMake build on 2026-11-02, so
+  # no later pin has one. The tarball has no `-python` (OR_REQUIRE_PYTHON=0); Python under Bazel is
+  # the wheel (OpenROAD#11566). History below is kept for the CMake-era pins.
   # Measured 2026-09-28 at this commit: the Bazel //:openroad is byte-identical to CMake
   # on the whole pdn suite (168/168 exit codes, 127/127 result files) and needs only
   # glibc >= 2.27 with libstdc++ static (CMake: glibc >= 2.39) — but it has NO PYTHON

@@ -67,15 +67,16 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           mkdir -p dist
-          # ⛔ cmake, because the Bazel `openroad` has NO PYTHON at the pin (measured
-          # 2026-09-28, da9f29f: BUILD_PYTHON=false is hardcoded; the banner reads
-          # "-GPU -GUI -Python"), and LibreLane launches `openroad -python` for every odb
-          # step. build-bundle.sh now REFUSES a Python-less binary, so without this line
-          # the release would fail loudly rather than ship it. Revisit when upstream's
-          # Bazel binary carries Python — the pdn suite is otherwise byte-identical.
+          # ⛔ BAZEL from the 4155ac31 pin (2026-11-03): upstream deleted the CMake build on
+          # 2026-11-02 (Build.sh: "-cmake-build: the CMake build was removed"), so a pin after
+          # that has none to build. OR_REQUIRE_PYTHON=0: the Bazel //:openroad has no `-python`;
+          # Python under Bazel is //python/openroad:openroad_wheel (OpenROAD#11566), and smoke.sh
+          # checks `-python` only when the banner claims Python. Same settings as nightly.yml.
+          # ⚠️ linux/arm64 under Bazel's clang fails -Werror in the odb lef/def lexers until
+          # OpenROAD#12105 merges (char compared with EOF); this repo builds the pin unpatched.
           docker run --rm \
             -e OR_COMMIT="${{ steps.pin.outputs.commit }}" -e VERSION="$VERSION" -e OUT_DIR=/out \
-            -e OR_BUILD_SYSTEM=cmake \
+            -e OR_BUILD_SYSTEM=bazel -e OR_REQUIRE_PYTHON=0 \
             -v "$PWD/dist:/out" -v "$PWD/scripts:/scripts:ro" \
             oror-deps:local bash /scripts/build-bundle.sh
 
