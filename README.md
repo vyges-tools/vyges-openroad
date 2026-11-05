@@ -77,6 +77,20 @@ Edit **`upstream.yaml`** (`commit`, `updated_at`) — the source of truth — th
 `release` workflow with a `version` (e.g. `2026.07.0`). A sync workflow proposes pin bumps
 via PR when OpenROAD `master` advances.
 
+## Upstream watch
+
+Every Saturday at 15:00 UTC (07:00 PST / 08:00 PDT), [`upstream-watch`](.github/workflows/upstream-watch.yml)
+compares the commit [`upstream.yaml`](upstream.yaml) pins with OpenROAD `master` and writes a digest to
+[`reports/upstream-watch/`](reports/upstream-watch/) (`latest.md`, plus one file per week):
+
+- the commits since the pin, by module, with the functions each one touched;
+- the commits that updated regression goldens (`.ok`, `.defok`, `.guideok`, ...), i.e. the observable behaviour changes;
+- the OpenSTA submodule's movement;
+- the pull requests and issues updated that week.
+
+It reads public upstream data only (`scripts/upstream-watch.py`, standard library). Run it by hand with
+`gh workflow run upstream-watch.yml`, or locally with `GH_TOKEN=$(gh auth token) python3 scripts/upstream-watch.py --out /tmp/uw`.
+
 ## Licensing
 
 Repository tooling (Dockerfiles, scripts, workflows) is Apache-2.0 (`LICENSE`). The **built
