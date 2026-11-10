@@ -11,6 +11,14 @@ on:
         description: 'Release version YYYY.MM.N (e.g. 2026.07.2)'
         required: true
         type: string
+      arches:
+        # x86_64 alone exists for pins whose arm64 Bazel build is red (4155ac31: odb's LEF/DEF
+        # lexers fail -Werror under arm64 clang until OpenROAD#12105 merges). With `both`, one red
+        # leg stops the publish, as it always has.
+        description: 'Architectures to build and publish'
+        type: choice
+        options: [both, x86_64]
+        default: both
 
 permissions:
   contents: write
@@ -20,17 +28,32 @@ env:
   IMAGE: ghcr.io/vyges-tools/vyges-openroad
 
 jobs:
+  # The matrix holds only the selected arches, so `publish` (needs: build) runs exactly when every
+  # selected arch built and smoked green.
+  plan:
+    runs-on: ubuntu-${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      platforms: ${{ steps.m.outputs.platforms }}
+    steps:
+      - id: m
+        env:
+          ARCHES: ${{ inputs.arches }}
+          UBU: ${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}
+        run: |
+          X='{"runner":"ubuntu-'"$UBU"'","arch":"x86_64","docker_arch":"amd64"}'
+          A='{"runner":"ubuntu-'"$UBU"'-arm","arch":"aarch64","docker_arch":"arm64"}'
+          case "$ARCHES" in
+            x86_64) echo "matrix=[$X]" >> "$GITHUB_OUTPUT"; echo "platforms=linux/amd64" >> "$GITHUB_OUTPUT" ;;
+            *)      echo "matrix=[$X,$A]" >> "$GITHUB_OUTPUT"; echo "platforms=linux/amd64 + linux/arm64" >> "$GITHUB_OUTPUT" ;;
+          esac
+
   build:
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: ubuntu-${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}
-            arch: x86_64
-            docker_arch: amd64
-          - runner: ubuntu-${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}-arm
-            arch: aarch64
-            docker_arch: arm64
+        include: ${{ fromJson(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     name: build-${{ matrix.arch }}
     timeout-minutes: 300
@@ -113,7 +136,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [plan, build]
     runs-on: ubuntu-${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}
     steps:
       - uses: actions/checkout@v7
@@ -168,9 +191,9 @@ jobs:
           name: vyges-openroad ${{ inputs.version }}
           body: |
             Mainline OpenROAD, reproducibly built by Vyges.
-            **Multi-arch: linux/amd64 + linux/arm64** (native builds, digest-based manifest).
+            **Platforms: ${{ needs.plan.outputs.platforms }}** (native builds, digest-based manifest).
             - upstream commit: `${{ steps.pin.outputs.commit }}`
-            - image: `${{ env.IMAGE }}:${{ inputs.version }}` (multi-arch manifest, also `:sha-…`, `:latest`)
+            - image: `${{ env.IMAGE }}:${{ inputs.version }}` (manifest, also `:sha-…`, `:latest`)
             - manifest digest: `${{ steps.manifest.outputs.digest }}`
           files: dist/*.tar.gz
 
@@ -182,4 +205,4 @@ jobs:
             "https://github.com/${{ github.repository }}/releases/download/${{ inputs.version }}/vyges-openroad-${{ inputs.version }}-g${{ steps.pin.outputs.short }}-linux-x86_64.tar.gz"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add index.json && git commit -m "index: ${{ inputs.version }} (${{ steps.pin.outputs.short }}) multi-arch" && git push || echo "index unchanged"
+          git add index.json && git commit -m "index: ${{ inputs.version }} (${{ steps.pin.outputs.short }}) ${{ inputs.arches }}" && git push || echo "index unchanged"
