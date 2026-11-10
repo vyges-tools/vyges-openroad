@@ -1,0 +1,157 @@
+name: wrap-vyges-image
+
+# Wrap the tarballs of a `<version>-vyges` release (OpenROAD + Vyges fix patches, built and
+# published to this repo's Releases by a private build) into the container image, with the same
+# Dockerfile.runtime the plain release uses. This repo never sees patch files, only built bundles.
+#
+# Tags are always suffixed: `:<version>-vyges` and `:sha-<short>-vyges`. This workflow NEVER
+# writes `:latest`, `:<version>` or `:sha-<short>` (those name the plain upstream build), and it
+# refuses a release that is not labelled as the patched build. index.json is not touched: it is
+# the lookup table for the plain builds.
+#
+# Per arch by digest, then one manifest — the same shape as release.yml.
+#   gh workflow run wrap-vyges-image.yml -R vyges-tools/vyges-openroad -f tag=2026.11.0-vyges
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'A <version>-vyges release in this repo (e.g. 2026.11.0-vyges)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # append the image digest to the release notes
+  packages: write
+
+env:
+  IMAGE: ghcr.io/vyges-tools/vyges-openroad
+
+jobs:
+  plan:
+    runs-on: ubuntu-${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}
+    outputs:
+      matrix: ${{ steps.p.outputs.matrix }}
+      short: ${{ steps.p.outputs.short }}
+    steps:
+      - name: Read the release
+        id: p
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          [[ "$TAG" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]+-vyges$ ]] || { echo "tag must be YYYY.MM.N-vyges, got '$TAG'"; exit 1; }
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > assets.txt
+          cat assets.txt
+          # The label the private build attaches. Without it this is not the patched pipeline's
+          # release, and wrapping it under a -vyges tag would mislabel whatever it is.
+          grep -qx vyges-fixes.json assets.txt || { echo "no vyges-fixes.json asset: not a patched-build release"; exit 1; }
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p vyges-fixes.json
+          COMMIT=$(jq -r .upstream_commit vyges-fixes.json)
+          [ "$(jq -r .variant vyges-fixes.json)" = vyges ] || { echo "vyges-fixes.json variant is not vyges"; exit 1; }
+          M=$(grep -oE -- '-linux-(x86_64|aarch64)\.tar\.gz$' assets.txt | sed -E 's/-linux-(.*)\.tar\.gz/\1/' | sort -u | jq -R . | jq -sc 'map({arch: ., runner: (if . == "aarch64" then "ubuntu-24.04-arm" else "ubuntu-24.04" end), docker_arch: (if . == "aarch64" then "arm64" else "amd64" end)})')
+          [ "$M" != "[]" ] || { echo "no linux tarballs in $TAG"; exit 1; }
+          echo "matrix=$M" >> "$GITHUB_OUTPUT"
+          echo "short=$(echo "$COMMIT" | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
+  wrap:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    name: wrap-${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download + verify the tarball
+        id: b
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -eu
+          mkdir -p dist && cd dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p "*-linux-${ARCH}.tar.gz" -p "*-linux-${ARCH}.tar.gz.sha256"
+          sha256sum -c ./*.sha256
+          tar -xzf ./*-linux-"${ARCH}".tar.gz
+          NAME=$(tar -tzf ./*-linux-"${ARCH}".tar.gz | head -1 | cut -d/ -f1)
+          [ -s "$NAME/VYGES-FIXES.md" ] || { echo "bundle $NAME has no VYGES-FIXES.md: refusing to label it -vyges"; exit 1; }
+          echo "bundle=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The Dockerfile's own labels describe the plain build; --label overrides them here.
+      - name: Build + push BY DIGEST (native ${{ matrix.docker_arch }})
+        env:
+          TAG: ${{ inputs.tag }}
+          BUNDLE: ${{ steps.b.outputs.bundle }}
+          DA: ${{ matrix.docker_arch }}
+        run: |
+          docker buildx build -f Dockerfile.runtime \
+            --build-arg BUNDLE_DIR="$BUNDLE" --build-arg VERSION="$TAG" \
+            --label org.opencontainers.image.title="vyges-openroad (vyges fixes)" \
+            --label org.opencontainers.image.description="OpenROAD with Vyges fix patches applied; NOT plain upstream. Patch list: /opt/vyges-openroad/VYGES-FIXES.md" \
+            --label com.vyges.tool.variant="vyges" \
+            --platform "linux/${DA}" --provenance=false \
+            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file /tmp/meta.json dist
+          DIGEST=$(jq -r '."containerimage.digest"' /tmp/meta.json)
+          echo "pushed $IMAGE@$DIGEST"
+          docker run --rm "$IMAGE@$DIGEST" sh -c 'openroad -version && test -s /opt/vyges-openroad/VYGES-FIXES.md'
+          mkdir -p /tmp/digests && touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+
+  merge:
+    needs: [plan, wrap]
+    runs-on: ubuntu-${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Manifest + suffixed tags only
+        id: m
+        env:
+          TAG: ${{ inputs.tag }}
+          SHORT: ${{ needs.plan.outputs.short }}
+        run: |
+          set -eu
+          SRCS=$(for f in /tmp/digests/*; do echo -n "${IMAGE}@sha256:$(basename "$f") "; done)
+          for T in "$TAG" "sha-${SHORT}-vyges"; do
+            case "$T" in *-vyges) ;; *) echo "refusing unsuffixed tag $T"; exit 1 ;; esac
+            docker buildx imagetools create -t "${IMAGE}:${T}" $SRCS
+          done
+          MDIG=$(docker buildx imagetools inspect "${IMAGE}:${TAG}" --format '{{.Manifest.Digest}}')
+          echo "digest=$MDIG" >> "$GITHUB_OUTPUT"
+      - name: Record the image on the release
+        env:
+          TAG: ${{ inputs.tag }}
+          SHORT: ${{ needs.plan.outputs.short }}
+          DIGEST: ${{ steps.m.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > body.md
+          grep -q "$DIGEST" body.md || printf '\nImage: `%s:%s` (also `:sha-%s-vyges`), manifest digest `%s`.\n' "$IMAGE" "$TAG" "$SHORT" "$DIGEST" >> body.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file body.md

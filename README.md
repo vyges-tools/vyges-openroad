@@ -9,7 +9,10 @@ slim container and a relocatable binary tarball — to pop in.
 
 - **Rebuild, never fork or vendor.** We build OpenROAD `master` at a pinned commit — this
   repo holds only the *build recipe* (no OpenROAD source, README, or tree in-tree; CI clones
-  upstream at build time). **Zero source patches, no unmerged PRs.**
+  upstream at build time). **The plain build carries zero source patches and no unmerged PRs.**
+- **Two builds, never confused.** Next to the plain build, some releases also ship a separately
+  labelled build with our fixes for reported upstream defects (see
+  [Two builds](#two-builds-plain-and--vyges)). Everything about that one carries a `-vyges` suffix.
 - **Binary-first.** The relocatable bundle is the primary product; the container wraps the
   *same* bytes (slim runtime image, no build tooling).
 - **Images:** `ghcr.io/vyges-tools/vyges-openroad` · **Tarballs:** GitHub Releases.
@@ -30,6 +33,28 @@ slim container and a relocatable binary tarball — to pop in.
     // "openroad": { "path": "/opt/vyges-openroad/current/bin/openroad" }
 } }
 ```
+
+## Two builds: plain and `-vyges`
+
+| | Plain (default) | `-vyges` |
+|---|---|---|
+| Source | upstream OpenROAD at the pinned commit, unmodified | the same commit with a short list of fix patches applied |
+| Release | `YYYY.MM.N` (marked Latest) | `YYYY.MM.N-vyges` (never Latest) |
+| Tarball | `vyges-openroad-YYYY.MM.N-g<short>-linux-<arch>.tar.gz` | `vyges-openroad-YYYY.MM.N-vyges-g<short>-linux-<arch>.tar.gz` |
+| Image tags | `:YYYY.MM.N`, `:sha-<short>`, `:latest` | `:YYYY.MM.N-vyges`, `:sha-<short>-vyges` only |
+| `index.json` / `which.sh` | listed | not listed |
+
+Use the **plain** build unless you need one of the fixes. LibreLane flows and anything that compares
+against reference OpenROAD behaviour should stay on it.
+
+The `-vyges` build fixes defects we have reported upstream, each found while checking our own
+engines against OpenROAD, mostly in detailed routing (`drt`) and one in the LEF reader (`odb`). The
+release notes and the bundle's `VYGES-FIXES.md` / `vyges-fixes.json` list every patch with its
+upstream issue number and sha256; `NOTICE` says the build is modified. A patch is dropped as soon as
+upstream merges a fix, so the list shrinks to nothing as upstream catches up. The patch files are not
+published. The build is made outside this repo, from this repo's recipe at a recorded commit, and only
+the built tarballs come here; [`wrap-vyges-image.yml`](.github/workflows/wrap-vyges-image.yml) wraps
+them into the image with the same `Dockerfile.runtime`.
 
 ## Naming & selecting a build
 
@@ -69,7 +94,8 @@ Binary-first, two-stage for cheap free-runner CI:
 3. **`Dockerfile.runtime`** wraps that same bundle into the slim image.
 
 Workflows: `deps.yml` (base), `release.yml` (pinned release → image + tarball + GH Release +
-`index.json`), `nightly.yml` (track `master` HEAD → `:master-latest`).
+`index.json`), `nightly.yml` (track `master` HEAD → `:master-latest`), `wrap-vyges-image.yml`
+(a `-vyges` release's tarballs → its suffixed image tags).
 
 ## Cut a release / bump the pin
 
@@ -96,4 +122,5 @@ It reads public upstream data only (`scripts/upstream-watch.py`, standard librar
 Repository tooling (Dockerfiles, scripts, workflows) is Apache-2.0 (`LICENSE`). The **built
 artifact is upstream OpenROAD, BSD-3-Clause** — each bundle ships OpenROAD's own license as
 `LICENSE.OpenROAD` plus a `NOTICE` and `manifest.json` recording the exact commit + submodule
-provenance.
+provenance. A `-vyges` bundle is a modified build of the same BSD-3-Clause source, under the same
+license; its `NOTICE` says so and `vyges-fixes.json` records what was changed.
