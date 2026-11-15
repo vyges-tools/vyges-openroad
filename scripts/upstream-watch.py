@@ -9,7 +9,8 @@ build configuration (compiler flags, toolchain), the OpenSTA submodule's movemen
 pull requests and issues active in the last week.
 
 Public facts about the upstream project only. Standard library only, so the workflow needs no
-installs. Token: GITHUB_TOKEN (the Actions token is enough for the ~150 calls a week takes).
+installs. Token: GITHUB_TOKEN. It makes about one call per commit since the pin (plus one per
+extra 300 files); the Actions token allows 1000 an hour.
 
 Usage: upstream-watch.py --out reports/upstream-watch [--date YYYY-MM-DD] [--days 7]
 """
@@ -122,6 +123,52 @@ def build_config_hit(f):
     return False
 
 
+PAGE = 100          # compare: commits per page (the API's maximum)
+FILES_PAGE = 300    # commit detail: files per page (the API's default and maximum)
+FILES_MAX = 3000    # commit detail: the API never returns more files than this
+
+
+def compare_all(repo, base, head, warnings):
+    """Every commit between base and head, following the compare API's pages.
+
+    Without paging the compare API stops at 250 commits. The count actually listed is checked
+    against total_commits; any shortfall becomes a warning, never a silent truncation."""
+    commits, page, first = [], 1, None
+    while True:
+        r = api(f"repos/{repo}/compare/{base}...{head}", {"per_page": str(PAGE), "page": str(page)})
+        first = first or r
+        batch = r.get("commits", [])
+        commits.extend(batch)
+        if len(batch) < PAGE or len(commits) >= r.get("total_commits", 0):
+            break
+        page += 1
+    total = first.get("total_commits", len(commits))
+    if len(commits) < total:
+        warnings.append(f"{repo}: compare listed {len(commits)} of {total} commits")
+    return commits, first.get("ahead_by", total), total
+
+
+def commit_detail(repo, sha, warnings):
+    """A commit with its complete file list: the detail API pages files 300 at a time."""
+    d = api(f"repos/{repo}/commits/{sha}", {"per_page": str(FILES_PAGE), "page": "1"})
+    files, page = list(d.get("files", [])), 1
+    while len(files) == page * FILES_PAGE and len(files) < FILES_MAX:
+        page += 1
+        more = api(f"repos/{repo}/commits/{sha}",
+                   {"per_page": str(FILES_PAGE), "page": str(page)}).get("files", [])
+        files.extend(more)
+        if len(more) < FILES_PAGE:
+            break
+    if len(files) >= FILES_MAX:
+        warnings.append(f"{sha[:10]}: file list capped at {FILES_MAX} by the API")
+    no_patch = sum(1 for f in files if f.get("changes") and "patch" not in f)
+    if no_patch:
+        warnings.append(f"{sha[:10]}: {no_patch} file(s) with no diff returned (too large); "
+                        "their functions and build lines are not read")
+    d["files"] = files
+    return d
+
+
 def submodule_sha(ref):
     try:
         return api(f"repos/{OR_REPO}/contents/src/sta", {"ref": ref}).get("sha")
@@ -138,14 +185,19 @@ def main():
 
     pin = read_pin()
     head = api(f"repos/{OR_REPO}/commits/master")["sha"]
-    cmp = api(f"repos/{OR_REPO}/compare/{pin}...{head}", {"per_page": "250"})
-    commits = [c for c in cmp["commits"] if len(c["parents"]) == 1]  # merges add no change of their own
+    warnings = []
+    listed, ahead_by, total = compare_all(OR_REPO, pin, head, warnings)
+    commits = [c for c in listed if len(c["parents"]) == 1]  # merges add no change of their own
 
     by_module = defaultdict(list)       # module -> [(sha, title, [funcs], [goldens])]
     golden_commits = []
     build_commits = []                  # (sha, title, [files])
-    for c in commits:
-        d = api(f"repos/{OR_REPO}/commits/{c['sha']}")
+    for i, c in enumerate(commits):
+        try:
+            d = commit_detail(OR_REPO, c["sha"], warnings)
+        except urllib.error.HTTPError as e:   # rate limit: say where it stopped, never truncate silently
+            warnings.append(f"commit details stopped at {i} of {len(commits)} (HTTP {e.code})")
+            break
         title = d["commit"]["message"].split("\n")[0]
         mods = defaultdict(lambda: ([], []))
         build_files = [f["filename"] for f in d.get("files", []) if build_config_hit(f)]
@@ -165,9 +217,9 @@ def main():
     sta_pin, sta_head = submodule_sha(pin), submodule_sha(head)
     sta_commits = []
     if sta_pin and sta_head and sta_pin != sta_head:
-        sc = api(f"repos/{STA_REPO}/compare/{sta_pin}...{sta_head}", {"per_page": "250"})
+        sc, _, _ = compare_all(STA_REPO, sta_pin, sta_head, warnings)
         sta_commits = [(x["sha"][:9], x["commit"]["message"].split("\n")[0])
-                       for x in sc["commits"] if len(x["parents"]) == 1]
+                       for x in sc if len(x["parents"]) == 1]
 
     since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=a.days)).strftime("%Y-%m-%d")
     q = f"repo:{OR_REPO} updated:>={since}"
@@ -179,11 +231,13 @@ def main():
     issues, issues_total = search("issue")
 
     L = [f"# Upstream OpenROAD — weekly digest {a.date}", "",
-         f"- Pinned: `{pin[:12]}` · master: `{head[:12]}` · {cmp['ahead_by']} commits ahead "
-         f"({len(commits)} non-merge)",
+         f"- Pinned: `{pin[:12]}` · master: `{head[:12]}` · {ahead_by} commits ahead "
+         f"({len(listed)} listed, {len(commits)} non-merge)",
          f"- OpenSTA submodule: `{(sta_pin or '?')[:9]}` → `{(sta_head or '?')[:9]}`"
          + (f" ({len(sta_commits)} commits)" if sta_commits else " (unchanged)"),
-         f"- Window for pull requests and issues: updated since {since}", ""]
+         f"- Window for pull requests and issues: updated since {since}"]
+    L += [f"- Coverage warning: {w}" for w in warnings] or ["- Coverage: every commit and file listed"]
+    L += [""]
     L += ["## Behaviour changes (regression goldens updated)", ""]
     if golden_commits:
         L += ["| Module | Commit | Title | Goldens |", "|---|---|---|---|"]
@@ -223,7 +277,9 @@ def main():
     for fn in (f"{a.date}.md", "latest.md"):
         with open(os.path.join(a.out, fn), "w") as fh:
             fh.write(body)
-    print(f"wrote {a.out}/{a.date}.md: {len(commits)} commits, {len(golden_commits)} golden changes, "
+    for w in warnings:
+        print(f"WARNING: {w}", file=sys.stderr)
+    print(f"wrote {a.out}/{a.date}.md: {ahead_by} ahead, {len(listed)} listed, {len(commits)} non-merge, {len(golden_commits)} golden changes, "
           f"{len(build_commits)} build configuration changes, "
           f"{len(prs)} PRs, {len(issues)} issues")
 

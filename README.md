@@ -116,7 +116,10 @@ compares the commit [`upstream.yaml`](upstream.yaml) pins with OpenROAD `master`
 - the OpenSTA submodule's movement;
 - the pull requests and issues updated that week.
 
-It reads public upstream data only (`scripts/upstream-watch.py`, standard library). Run it by hand with
+It reads public upstream data only (`scripts/upstream-watch.py`, standard library). It pages through the
+compare and commit APIs, so every commit since the pin and every file of each commit is read; anything the
+API still caps (3000 files per commit, diffs too large to return) is printed as a coverage warning in the
+digest. `python3 -m unittest discover -s tests` checks this against a fake 600-commit response. Run it by hand with
 `gh workflow run upstream-watch.yml`, or locally with `GH_TOKEN=$(gh auth token) python3 scripts/upstream-watch.py --out /tmp/uw`.
 
 ## Licensing
