@@ -4,8 +4,9 @@
 
 Reads the pin from upstream.yaml, compares it with upstream master through the GitHub REST API,
 and writes a Markdown report: the commits per module, the functions each one touched (from the
-diff hunk headers), the commits that changed regression goldens, the OpenSTA submodule's
-movement, and the open pull requests and issues active in the last week.
+diff hunk headers), the commits that changed regression goldens, the commits that changed the
+build configuration (compiler flags, toolchain), the OpenSTA submodule's movement, and the open
+pull requests and issues active in the last week.
 
 Public facts about the upstream project only. Standard library only, so the workflow needs no
 installs. Token: GITHUB_TOKEN (the Actions token is enough for the ~150 calls a week takes).
@@ -28,6 +29,16 @@ API = "https://api.github.com"
 # Regression goldens: a commit that changes one changed the tool's observable behaviour.
 GOLDEN = re.compile(r"\.(ok|defok|guideok|segsok|vok|odbok|spefok|rptok|lefok|gdsok)$")
 HUNK_FUNC = re.compile(r"^@@ [^@]* @@ ?(.*)$", re.M)
+# Build configuration: compile/link flags and the C++ toolchain decide the code the compiler emits.
+BUILD_RC = re.compile(r"^(\.bazelrc|MODULE\.bazel|bazel/.+)$")
+BUILD_FILE = re.compile(r"(^|/)(BUILD|BUILD\.bazel)$|\.bzl$")
+FLAG_LINE = re.compile(r"\b(copts|cxxopts|conlyopts|linkopts)\b")
+FEATURE_LINE = re.compile(r"\bfeatures\b")
+# Bazel features that check includes or headers and leave the generated code as it is.
+NEUTRAL_FEATURES = {"layering_check", "parse_headers", "header_modules", "module_maps"}
+# Python package locks under bazel/ pin tooling, not the C/C++ build.
+NOT_BUILD_CONFIG = re.compile(r"^bazel/.*requirements[^/]*\.(txt|in)$")
+TOOLCHAIN_LINE = re.compile(r"\b(llvm|toolchains_llvm|rules_cc|cc_toolchain|clang|libcxx|glibc)\b")
 
 
 def api(path, params=None):
@@ -75,6 +86,42 @@ def func_context(patch):
     return names
 
 
+def changed_lines(patch):
+    """The added and removed lines of a unified diff, without the +/- marker."""
+    return [ln[1:] for ln in (patch or "").splitlines()
+            if ln[:1] in "+-" and not ln.startswith(("+++", "---"))]
+
+
+def flag_line(ln):
+    """A BUILD line that sets compile/link options, or a feature other than a header check."""
+    if FLAG_LINE.search(ln):
+        return True
+    if FEATURE_LINE.search(ln):
+        named = {x.lstrip("-") for x in re.findall(r"[\"']([^\"']+)[\"']", ln)}
+        return not named or not named <= NEUTRAL_FEATURES
+    return False
+
+
+def build_config_hit(f):
+    """True when a changed file touches the build configuration.
+
+    .bazelrc, MODULE.bazel and bazel/** always count. MODULE.bazel.lock counts only when a changed
+    line names a toolchain module (dependency bumps elsewhere in the lock are left out). A BUILD
+    file counts only when a changed line touches copts / linkopts, or features other than the
+    header checks. Python package locks under bazel/ are left out. A file whose diff GitHub does
+    not return (too large) cannot be judged and is left out too."""
+    name, patch = f["filename"], f.get("patch")
+    if NOT_BUILD_CONFIG.match(name):
+        return False
+    if BUILD_RC.match(name):
+        return True
+    if name == "MODULE.bazel.lock":
+        return any(TOOLCHAIN_LINE.search(ln) for ln in changed_lines(patch))
+    if BUILD_FILE.search(name):
+        return any(flag_line(ln) for ln in changed_lines(patch))
+    return False
+
+
 def submodule_sha(ref):
     try:
         return api(f"repos/{OR_REPO}/contents/src/sta", {"ref": ref}).get("sha")
@@ -96,10 +143,14 @@ def main():
 
     by_module = defaultdict(list)       # module -> [(sha, title, [funcs], [goldens])]
     golden_commits = []
+    build_commits = []                  # (sha, title, [files])
     for c in commits:
         d = api(f"repos/{OR_REPO}/commits/{c['sha']}")
         title = d["commit"]["message"].split("\n")[0]
         mods = defaultdict(lambda: ([], []))
+        build_files = [f["filename"] for f in d.get("files", []) if build_config_hit(f)]
+        if build_files:
+            build_commits.append((c["sha"][:10], title, build_files))
         for f in d.get("files", []):
             m = module_of(f["filename"])
             funcs, golds = mods[m]
@@ -141,6 +192,13 @@ def main():
             L.append(f"| {m} | `{s}` | {t} | {shown} |")
     else:
         L.append("None.")
+    L += ["", "## Build configuration (compiler flags, toolchain)", ""]
+    if build_commits:
+        for s, t, files in build_commits:
+            shown = ", ".join(files[:6]) + (f" +{len(files)-6}" if len(files) > 6 else "")
+            L.append(f"- `{s}` {t} — {shown}")
+    else:
+        L.append("None.")
     L += ["", "## Commits by module (functions from the diff hunk headers)", ""]
     for m in sorted(by_module, key=lambda k: (-len(by_module[k]), k)):
         L.append(f"### {m} ({len(by_module[m])})")
@@ -166,6 +224,7 @@ def main():
         with open(os.path.join(a.out, fn), "w") as fh:
             fh.write(body)
     print(f"wrote {a.out}/{a.date}.md: {len(commits)} commits, {len(golden_commits)} golden changes, "
+          f"{len(build_commits)} build configuration changes, "
           f"{len(prs)} PRs, {len(issues)} issues")
 
 

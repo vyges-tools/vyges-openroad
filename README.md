@@ -111,6 +111,8 @@ compares the commit [`upstream.yaml`](upstream.yaml) pins with OpenROAD `master`
 
 - the commits since the pin, by module, with the functions each one touched;
 - the commits that updated regression goldens (`.ok`, `.defok`, `.guideok`, ...), i.e. the observable behaviour changes;
+- the commits that changed the build configuration: `.bazelrc`, `MODULE.bazel`, `bazel/`, toolchain lines of
+  `MODULE.bazel.lock`, and BUILD files whose diff touches `copts`, `linkopts` or code-generating `features`;
 - the OpenSTA submodule's movement;
 - the pull requests and issues updated that week.
 
