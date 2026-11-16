@@ -38,6 +38,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ github.token }}
+          RUNNER_UBUNTU: ubuntu-${{ vars.VYGES_UBUNTU_VERSION || '24.04' }}
         run: |
           set -eu
           [[ "$TAG" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]+-vyges$ ]] || { echo "tag must be YYYY.MM.N-vyges, got '$TAG'"; exit 1; }
@@ -49,7 +50,7 @@ jobs:
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p vyges-fixes.json
           COMMIT=$(jq -r .upstream_commit vyges-fixes.json)
           [ "$(jq -r .variant vyges-fixes.json)" = vyges ] || { echo "vyges-fixes.json variant is not vyges"; exit 1; }
-          M=$(grep -oE -- '-linux-(x86_64|aarch64)\.tar\.gz$' assets.txt | sed -E 's/-linux-(.*)\.tar\.gz/\1/' | sort -u | jq -R . | jq -sc 'map({arch: ., runner: (if . == "aarch64" then "ubuntu-24.04-arm" else "ubuntu-24.04" end), docker_arch: (if . == "aarch64" then "arm64" else "amd64" end)})')
+          M=$(grep -oE -- '-linux-(x86_64|aarch64)\.tar\.gz$' assets.txt | sed -E 's/-linux-(.*)\.tar\.gz/\1/' | sort -u | jq -R . | jq -sc --arg u "$RUNNER_UBUNTU" 'map({arch: ., runner: (if . == "aarch64" then ($u + "-arm") else $u end), docker_arch: (if . == "aarch64" then "arm64" else "amd64" end)})')
           [ "$M" != "[]" ] || { echo "no linux tarballs in $TAG"; exit 1; }
           echo "matrix=$M" >> "$GITHUB_OUTPUT"
           echo "short=$(echo "$COMMIT" | cut -c1-12)" >> "$GITHUB_OUTPUT"
