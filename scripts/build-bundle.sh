@@ -123,8 +123,17 @@ if [ "$OR_BUILD_SYSTEM" = "bazel" ]; then
   "$BZL" build --config=release --//:platform=cli ${OR_BAZEL_FLAGS:-} //:openroad
 
   # bazel-bin is a symlink into the output base, so resolve it: the bundle copies
-  # a real file and then reads its ldd closure.
-  OR=$(readlink -f bazel-bin/openroad)
+  # a real file and then reads its ldd closure. Ask Bazel where //:openroad's file is
+  # rather than assume a path: upstream's src/ -> openroad/ rename (37a84d0a3e,
+  # 2026-11-17) moved it from bazel-bin/openroad to bazel-bin/openroad/openroad,
+  # where the old path is now a DIRECTORY ("Is a directory", exit 126).
+  # shellcheck disable=SC2086
+  OR_REL=$("$BZL" cquery --config=release --//:platform=cli ${OR_BAZEL_FLAGS:-} \
+             --output=files //:openroad 2>/dev/null | head -1 || true)
+  OR=""
+  for c in "$OR_REL" bazel-bin/openroad/openroad bazel-bin/openroad; do
+    [ -n "$c" ] && [ -f "$c" ] && { OR=$(readlink -f "$c"); break; }
+  done
 else
   compile_cmake
   OR=$(find /OpenROAD -name openroad -type f -executable | grep -v third-party | head -1)

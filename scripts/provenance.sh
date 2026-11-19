@@ -8,6 +8,8 @@ VERSION="${VERSION:-dev}"
 OR_TREE="${OR_TREE:-/OpenROAD}"
 
 sub() { git -C "$OR_TREE" submodule status "$1" 2>/dev/null | awk '{print $1}' | tr -d '+-' ; }
+# OpenSTA is openroad/sta since upstream's src/ -> openroad/ rename (37a84d0a3e, 2026-11-17).
+STA_PATH=openroad/sta; [ -e "$OR_TREE/openroad/sta" ] || STA_PATH=src/sta
 
 cat <<JSON
 {
@@ -15,7 +17,7 @@ cat <<JSON
   "version": "${VERSION}",
   "upstream_commit": "${OR_COMMIT}",
   "submodule_shas": {
-    "sta":   "$(sub src/sta)",
+    "sta":   "$(sub "$STA_PATH")",
     "abc":   "$(sub third-party/abc)",
     "slang": "$(sub third-party/slang-elab)"
   },

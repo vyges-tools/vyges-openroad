@@ -170,10 +170,14 @@ def commit_detail(repo, sha, warnings):
 
 
 def submodule_sha(ref):
-    try:
-        return api(f"repos/{OR_REPO}/contents/src/sta", {"ref": ref}).get("sha")
-    except urllib.error.HTTPError:
-        return None
+    # OpenSTA moved from src/sta to openroad/sta in upstream's src/ -> openroad/ rename
+    # (37a84d0a3e, 2026-11-17); try the new path first, then the old one for older refs.
+    for path in ("openroad/sta", "src/sta"):
+        try:
+            return api(f"repos/{OR_REPO}/contents/{path}", {"ref": ref}).get("sha")
+        except urllib.error.HTTPError:
+            continue
+    return None
 
 
 def main():
