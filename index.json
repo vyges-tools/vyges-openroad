@@ -2,6 +2,16 @@
   "schema": "vyges-openroad-index/1.0",
   "builds": [
     {
+      "commit": "4155ac31014923e0fa721b691d222511adc7d8c3",
+      "short": "4155ac310149",
+      "version": "2026.11.1",
+      "date": "2026-11-21",
+      "channel": "release",
+      "image_ref": "ghcr.io/vyges-tools/vyges-openroad:sha-4155ac310149",
+      "image_digest": "sha256:0e598b990e4b58dd4edf1b843bc559db704d396fec7fc5aa6b863b0849f8d9a9",
+      "tarball_url": "https://github.com/vyges-tools/vyges-openroad/releases/download/2026.11.1/vyges-openroad-2026.11.1-g4155ac310149-linux-x86_64.tar.gz"
+    },
+    {
       "commit": "f11b4276ba2389e3c7ad9791d1c9518f12453769",
       "short": "f11b4276ba23",
       "version": "nightly-f11b4276ba23",
@@ -90,16 +100,6 @@
       "image_ref": "ghcr.io/vyges-tools/vyges-openroad:sha-b02a728766f0",
       "image_digest": "sha256:a771113f12460f477a76338312f2cdab6432957b572a6ce82f72b93ae98f45ea",
       "tarball_url": ""
-    },
-    {
-      "commit": "4155ac31014923e0fa721b691d222511adc7d8c3",
-      "short": "4155ac310149",
-      "version": "2026.11.0",
-      "date": "2026-11-10",
-      "channel": "release",
-      "image_ref": "ghcr.io/vyges-tools/vyges-openroad:sha-4155ac310149",
-      "image_digest": "sha256:bcb388164a7fee39fd7d20bed79d1f2f083dafbfb552a58398b75c3d98962d0d",
-      "tarball_url": "https://github.com/vyges-tools/vyges-openroad/releases/download/2026.11.0/vyges-openroad-2026.11.0-g4155ac310149-linux-x86_64.tar.gz"
     },
     {
       "commit": "111792153443185f65bd2ff71666556064ba1291",
