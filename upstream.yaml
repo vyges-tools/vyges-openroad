@@ -6,7 +6,7 @@
 upstream:
   source: https://github.com/The-OpenROAD-Project/OpenROAD
   ref: master                                      # OpenROAD's default branch is `master`, not `main`
-  commit: 4155ac31014923e0fa721b691d222511adc7d8c3 # nightly-4155ac310149, 2026-11-03; version string set by the build
+  commit: f11b4276ba2389e3c7ad9791d1c9518f12453769 # nightly-f11b4276ba23, 2026-11-20; version string set by the build
   # ⛔ REQUIRED BY BOTH build systems, measured 2026-09-19 — not a CMake-only step.
   # A Bazel build of a tree without them fails in ANALYSIS, before any compile:
   #   ERROR: no such package 'src/sta': BUILD file not found ...
@@ -15,7 +15,7 @@ upstream:
   # does NOT stand in for it. (This line previously claimed the opposite; the trial
   # build falsified it.)
   recurse_submodules: true                         # sta, abc, slang-elab
-  updated_at: "2026-11-03T16:02:43Z"
+  updated_at: "2026-11-21T15:28:27Z"
 
 license:
   spdx: BSD-3-Clause                               # OpenROAD; shipped with the binary as LICENSE.OpenROAD
